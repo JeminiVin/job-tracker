@@ -1,0 +1,21 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Job {
+  id          String   @id @default(cuid())
+  companyName String
+  role        String
+  location    String   @default("Remote")
+  status      String   @default("Applied")
+  appliedDate String
+  salary      String   @default("Negotiable")
+  matchScore  Int      @default(90)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
