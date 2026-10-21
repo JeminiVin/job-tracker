@@ -16,6 +16,51 @@ import {
 } from 'lucide-react';
 import { DropResult } from '@hello-pangea/dnd';
 
+const LOCAL_STORAGE_KEY = 'trackflow_jobs_data';
+
+const initialJobs: Job[] = [
+  {
+    id: '1',
+    companyName: 'Linear Technologies',
+    role: 'Senior Next.js Engineer',
+    location: 'Remote',
+    status: 'Interviewing',
+    appliedDate: '2026-10-18',
+    salary: '$140k - $160k',
+    matchScore: 96,
+  },
+  {
+    id: '2',
+    companyName: 'Vercel Labs',
+    role: 'Full-Stack Developer',
+    location: 'Remote',
+    status: 'Applied',
+    appliedDate: '2026-10-20',
+    salary: '$120k - $150k',
+    matchScore: 92,
+  },
+  {
+    id: '3',
+    companyName: 'Supabase',
+    role: 'Product Dev (React/Node)',
+    location: 'Hybrid',
+    status: 'Offer',
+    appliedDate: '2026-10-10',
+    salary: '$135k/yr',
+    matchScore: 98,
+  },
+  {
+    id: '4',
+    companyName: 'OpenAI Partner Studio',
+    role: 'AI Interface Architect',
+    location: 'San Francisco',
+    status: 'Interviewing',
+    appliedDate: '2026-10-15',
+    salary: '$180k - $210k',
+    matchScore: 89,
+  },
+];
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'home' | 'app'>('home');
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -27,19 +72,37 @@ export default function Home() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. Fetch Jobs from Prisma Database API
+  // Fetch Jobs with Fallback to LocalStorage
   const fetchJobs = async () => {
     try {
       setIsLoading(true);
       const res = await fetch('/api/jobs');
+      if (!res.ok) throw new Error('API unavailable');
       const data = await res.json();
-      if (Array.isArray(data)) {
+      if (Array.isArray(data) && data.length > 0) {
         setJobs(data);
+      } else {
+        // Fallback to local storage if API returns empty
+        loadFromLocalStorage();
       }
     } catch (err) {
-      console.error('Failed to fetch jobs from database', err);
+      console.warn('Using LocalStorage fallback due to serverless DB environment');
+      loadFromLocalStorage();
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loadFromLocalStorage = () => {
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (saved) {
+      try {
+        setJobs(JSON.parse(saved));
+      } catch (e) {
+        setJobs(initialJobs);
+      }
+    } else {
+      setJobs(initialJobs);
     }
   };
 
@@ -47,20 +110,21 @@ export default function Home() {
     fetchJobs();
   }, []);
 
-  // 2. Drag & Drop Status Update API Call
+  // Save to LocalStorage helper
+  const updateAndSaveLocal = (updatedJobs: Job[]) => {
+    setJobs(updatedJobs);
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedJobs));
+  };
+
   const handleOnDragEnd = async (result: DropResult) => {
     const { destination, source, draggableId } = result;
     if (!destination) return;
     if (destination.droppableId === source.droppableId && destination.index === source.index) return;
 
     const newStatus = destination.droppableId as JobStatus;
+    const updated = jobs.map((job) => (job.id === draggableId ? { ...job, status: newStatus } : job));
+    updateAndSaveLocal(updated);
 
-    // Optimistic UI Update
-    setJobs((prevJobs) =>
-      prevJobs.map((job) => (job.id === draggableId ? { ...job, status: newStatus } : job))
-    );
-
-    // Call Backend API
     try {
       await fetch('/api/jobs', {
         method: 'PATCH',
@@ -68,38 +132,35 @@ export default function Home() {
         body: JSON.stringify({ id: draggableId, status: newStatus }),
       });
     } catch (err) {
-      console.error('Failed to update status in database', err);
-      fetchJobs(); // Revert on failure
+      console.log('Synced locally');
     }
   };
 
-  // 3. Add Job API Call
   const handleAddJob = async (newJob: Job) => {
+    const updated = [newJob, ...jobs];
+    updateAndSaveLocal(updated);
+
     try {
-      const res = await fetch('/api/jobs', {
+      await fetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newJob),
       });
-      const savedJob = await res.json();
-      setJobs((prevJobs) => [savedJob, ...prevJobs]);
     } catch (err) {
-      console.error('Failed to save job to database', err);
+      console.log('Saved to local storage successfully');
     }
   };
 
-  // 4. Delete Job API Call
   const handleDeleteJob = async (id: string) => {
-    // Optimistic UI Update
-    setJobs((prevJobs) => prevJobs.filter((job) => job.id !== id));
+    const updated = jobs.filter((job) => job.id !== id);
+    updateAndSaveLocal(updated);
 
     try {
       await fetch(`/api/jobs?id=${id}`, {
         method: 'DELETE',
       });
     } catch (err) {
-      console.error('Failed to delete job from database', err);
-      fetchJobs(); // Revert on failure
+      console.log('Deleted locally');
     }
   };
 
@@ -140,7 +201,7 @@ export default function Home() {
       try {
         const importedData = JSON.parse(event.target?.result as string);
         if (Array.isArray(importedData)) {
-          setJobs(importedData);
+          updateAndSaveLocal(importedData);
           alert('Data imported successfully!');
         }
       } catch (err) {
@@ -236,7 +297,7 @@ export default function Home() {
           </div>
 
           {isLoading ? (
-            <div className="text-center py-16 text-xs font-bold uppercase text-slate-400">Loading Database Applications...</div>
+            <div className="text-center py-16 text-xs font-bold uppercase text-slate-400">Loading Applications...</div>
           ) : dashboardView === 'board' ? (
             <KanbanBoard jobs={filteredJobs} onStatusChange={handleOnDragEnd} onDeleteJob={handleDeleteJob} />
           ) : (
